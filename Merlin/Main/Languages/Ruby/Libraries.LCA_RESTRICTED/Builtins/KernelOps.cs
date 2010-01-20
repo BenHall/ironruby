@@ -1319,15 +1319,43 @@ namespace IronRuby.Builtins {
             [DefaultProtocol, DefaultParameterValue(RubyFileOps.ReadWriteMode)]int permission) {
 
             string fileName = path.ConvertToString();
-            if (fileName.Length > 0 && fileName[0] == '|') {
-                throw new NotImplementedError();
+            RubyIO io;
+
+            if (fileName.Length > 0 && fileName[0] == '|') 
+            {
+                string cmd = fileName.Split(' ')[1].Trim();
+                string arguments = fileName.TrimStart(new[] { ' ', '|' }).Replace(cmd, "").Trim();
+                ProcessStartInfo info = new ProcessStartInfo(cmd, arguments);
+                info.RedirectStandardError = true;
+                info.RedirectStandardOutput = true;
+                info.RedirectStandardInput = true;
+                info.CreateNoWindow = true;
+                info.UseShellExecute = false;
+
+                Process process = new Process();
+                process.StartInfo = info;
+                process.OutputDataReceived += process_OutputDataReceived;
+                process.ErrorDataReceived += process_ErrorDataReceived;
+                process.Start();
+
+                io = new RubyIO(context, process.StandardOutput, process.StandardInput, IOModeEnum.Parse(mode));
             }
+            else
+            {
+                io = new RubyFile(context, fileName, IOModeEnum.Parse(mode));
+                SetPermission(context, fileName, permission);
+            }
+            return io;
+        }
 
-            RubyIO file = new RubyFile(context, fileName, IOModeEnum.Parse(mode));
+        private static void process_ErrorDataReceived(object sender, DataReceivedEventArgs e)
+        {
+            Console.Error.Write(e.Data);
+        }
 
-            SetPermission(context, fileName, permission);
-
-            return file;
+        static void process_OutputDataReceived(object sender, DataReceivedEventArgs e)
+        {
+            Console.Out.Write(e.Data);
         }
 
         [RubyMethod("open", RubyMethodAttributes.PrivateInstance)]
