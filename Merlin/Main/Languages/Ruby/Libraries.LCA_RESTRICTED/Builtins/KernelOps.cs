@@ -1323,22 +1323,7 @@ namespace IronRuby.Builtins {
 
             if (fileName.Length > 0 && fileName[0] == '|') 
             {
-                string cmd = fileName.Split(' ')[1].Trim();
-                string arguments = fileName.TrimStart(new[] { ' ', '|' }).Replace(cmd, "").Trim();
-                ProcessStartInfo info = new ProcessStartInfo(cmd, arguments);
-                info.RedirectStandardError = true;
-                info.RedirectStandardOutput = true;
-                info.RedirectStandardInput = true;
-                info.CreateNoWindow = true;
-                info.UseShellExecute = false;
-
-                Process process = new Process();
-                process.StartInfo = info;
-                process.OutputDataReceived += process_OutputDataReceived;
-                process.ErrorDataReceived += process_ErrorDataReceived;
-                process.Start();
-
-                io = new RubyIO(context, process.StandardOutput, process.StandardInput, IOModeEnum.Parse(mode));
+                io = ExecuteSubProcess(fileName, context, mode);
             }
             else
             {
@@ -1346,6 +1331,40 @@ namespace IronRuby.Builtins {
                 SetPermission(context, fileName, permission);
             }
             return io;
+        }
+
+        private static RubyIO ExecuteSubProcess(string fileName, RubyContext context, MutableString mode)
+        {
+            RubyIO io;
+            ProcessStartInfo info = CreateCommandInfo(fileName);
+
+            Process process = StartComand(info);
+
+            io = new RubyIO(context, process.StandardOutput, process.StandardInput, IOModeEnum.Parse(mode));
+            return io;
+        }
+
+        private static Process StartComand(ProcessStartInfo info)
+        {
+            Process process = new Process();
+            process.StartInfo = info;
+            process.OutputDataReceived += process_OutputDataReceived;
+            process.ErrorDataReceived += process_ErrorDataReceived;
+            process.Start();
+            return process;
+        }
+
+        private static ProcessStartInfo CreateCommandInfo(string fileName)
+        {
+            string cmd = fileName.Split(' ')[1].Trim();
+            string arguments = fileName.TrimStart(new[] { ' ', '|' }).Replace(cmd, "").Trim();
+            ProcessStartInfo info = new ProcessStartInfo(cmd, arguments);
+            info.RedirectStandardError = true;
+            info.RedirectStandardOutput = true;
+            info.RedirectStandardInput = true;
+            info.CreateNoWindow = true;
+            info.UseShellExecute = false;
+            return info;
         }
 
         private static void process_ErrorDataReceived(object sender, DataReceivedEventArgs e)
