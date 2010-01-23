@@ -1216,18 +1216,18 @@ namespace IronRuby.Builtins {
         [RubyMethod("exit", RubyMethodAttributes.PrivateInstance)]
         [RubyMethod("exit", RubyMethodAttributes.PublicSingleton)]
         public static void Exit(object self) {
-            Exit(self, 1);
+            Exit(self, 0);
         }
 
         [RubyMethod("exit", RubyMethodAttributes.PrivateInstance)]
         [RubyMethod("exit", RubyMethodAttributes.PublicSingleton)]
-        public static void Exit(object self, bool isSuccessful) {
+        public static void Exit(object self, [NotNull]bool isSuccessful) {
             Exit(self, isSuccessful ? 0 : 1);
         }
 
         [RubyMethod("exit", RubyMethodAttributes.PrivateInstance)]
         [RubyMethod("exit", RubyMethodAttributes.PublicSingleton)]
-        public static void Exit(object self, int exitCode) {
+        public static void Exit(object self, [DefaultProtocol]int exitCode) {
             throw new SystemExit(exitCode, "exit");
         }
 
@@ -1256,7 +1256,7 @@ namespace IronRuby.Builtins {
                 throw RubyExceptions.CreateArgumentError("called without a block");
             }
 
-            block.RubyContext.RegisterShutdownHandler(block);
+            block.RubyContext.RegisterShutdownHandler(block.Proc);
             return block.Proc;
         }
 
@@ -1308,6 +1308,20 @@ namespace IronRuby.Builtins {
                 RubyFileOps.Chmod(fileName, permission);
             }
         }
+        private static RubyIO CheckOpenPipe(RubyContext/*!*/ context, MutableString path, IOMode mode) {
+            string fileName = path.ConvertToString();
+            if (fileName.Length > 0 && fileName[0] == '|') {
+#if SILVERLIGHT
+                throw new NotSupportedException("open cannot create a subprocess");
+#else
+                if (fileName.Length > 1 && fileName[1] == '-') {
+                    throw new NotImplementedError("forking a process is not supported");
+                }
+                return RubyIOOps.OpenPipe(context, path.GetSlice(1), (IOMode)mode);
+#endif
+            }
+            return null;
+        }
 
         [RubyMethod("open", RubyMethodAttributes.PrivateInstance)]
         [RubyMethod("open", RubyMethodAttributes.PublicSingleton)]
@@ -1315,66 +1329,22 @@ namespace IronRuby.Builtins {
             RubyContext/*!*/ context,
             object self,
             [DefaultProtocol, NotNull]MutableString/*!*/ path,
-            [DefaultProtocol, Optional]MutableString mode,
+            [DefaultProtocol, Optional]MutableString modeString,
             [DefaultProtocol, DefaultParameterValue(RubyFileOps.ReadWriteMode)]int permission) {
 
+            IOMode mode = IOModeEnum.Parse(modeString);
+            
+            RubyIO pipe = CheckOpenPipe(context, path, mode);
+            if (pipe != null) {
+                return pipe;
+            }
+
             string fileName = path.ConvertToString();
-            RubyIO io;
+            RubyIO file = new RubyFile(context, fileName, mode);
 
-            if (fileName.Length > 0 && fileName[0] == '|') 
-            {
-                io = ExecuteSubProcess(fileName, context, mode);
-            }
-            else
-            {
-                io = new RubyFile(context, fileName, IOModeEnum.Parse(mode));
-                SetPermission(context, fileName, permission);
-            }
-            return io;
-        }
+            SetPermission(context, fileName, permission);
 
-        private static RubyIO ExecuteSubProcess(string fileName, RubyContext context, MutableString mode)
-        {
-            RubyIO io;
-            ProcessStartInfo info = CreateCommandInfo(fileName);
-
-            Process process = StartComand(info);
-
-            io = new RubyIO(context, process.StandardOutput, process.StandardInput, IOModeEnum.Parse(mode));
-            return io;
-        }
-
-        private static Process StartComand(ProcessStartInfo info)
-        {
-            Process process = new Process();
-            process.StartInfo = info;
-            process.OutputDataReceived += process_OutputDataReceived;
-            process.ErrorDataReceived += process_ErrorDataReceived;
-            process.Start();
-            return process;
-        }
-
-        private static ProcessStartInfo CreateCommandInfo(string fileName)
-        {
-            string cmd = fileName.Split(' ')[1].Trim();
-            string arguments = fileName.TrimStart(new[] { ' ', '|' }).Replace(cmd, "").Trim();
-            ProcessStartInfo info = new ProcessStartInfo(cmd, arguments);
-            info.RedirectStandardError = true;
-            info.RedirectStandardOutput = true;
-            info.RedirectStandardInput = true;
-            info.CreateNoWindow = true;
-            info.UseShellExecute = false;
-            return info;
-        }
-
-        private static void process_ErrorDataReceived(object sender, DataReceivedEventArgs e)
-        {
-            Console.Error.Write(e.Data);
-        }
-
-        static void process_OutputDataReceived(object sender, DataReceivedEventArgs e)
-        {
-            Console.Out.Write(e.Data);
+            return file;
         }
 
         [RubyMethod("open", RubyMethodAttributes.PrivateInstance)]
@@ -1400,11 +1370,12 @@ namespace IronRuby.Builtins {
             int mode,
             [DefaultProtocol, DefaultParameterValue(RubyFileOps.ReadWriteMode)]int permission) {
 
-            string fileName = path.ConvertToString();
-            if (fileName.Length > 0 && fileName[0] == '|') {
-                throw new NotImplementedError();
+            RubyIO pipe = CheckOpenPipe(context, path, (IOMode)mode);
+            if (pipe != null) {
+                return pipe;
             }
 
+            string fileName = path.ConvertToString();
             RubyIO file = new RubyFile(context, fileName, (IOMode)mode);
 
             SetPermission(context, fileName, permission);
